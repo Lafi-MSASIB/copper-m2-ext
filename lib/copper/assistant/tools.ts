@@ -200,6 +200,78 @@ export async function checkAvailability(
   return { status: "ok", product: product.name, colors };
 }
 
+export type CheapestInStockInput = { product?: ProductId };
+
+export type CheapestInStock =
+  | {
+      status: "ok";
+      priceUsd: number;
+      options: {
+        product: string;
+        colors: { color: string; stock: Stock }[];
+      }[];
+    }
+  | { status: "none_in_stock" }
+  | { status: "unavailable"; message: string };
+
+export const cheapestInStockInput: z.ZodType<CheapestInStockInput> = z.object({
+  product: z.enum(["copper-home", "copper-notes"]).optional(),
+});
+
+/**
+ * find_cheapest_in_stock: the cheapest Copper product that has a color on the
+ * shelf today. A color doesn't change the price (price is per product), so
+ * "cheapest color in stock" means the cheapest product with stock, and which of
+ * its colors can be bought now. Stock is read fresh each time.
+ */
+export async function findCheapestInStock(
+  input: CheapestInStockInput,
+): Promise<CheapestInStock> {
+  const rows = await readInventory();
+  if (rows === null) {
+    return {
+      status: "unavailable",
+      message:
+        "Stock can't be checked right now. Please try again in a little while.",
+    };
+  }
+
+  const candidates = getProducts()
+    .filter(
+      (product) => input.product === undefined || product.id === input.product,
+    )
+    .map((product) => ({
+      product,
+      // Back-ordered colors can't be bought today, so they are left out.
+      colors: product.colors.flatMap((color) => {
+        const row = rows.find(
+          (candidate) =>
+            candidate.product === product.name &&
+            candidate.color.toLowerCase() === color.toLowerCase(),
+        );
+        const stock = row ? stockLevel(row.units_in_stock) : "backordered";
+        return stock === "backordered" ? [] : [{ color, stock }];
+      }),
+    }))
+    .filter((candidate) => candidate.colors.length > 0);
+
+  if (candidates.length === 0) return { status: "none_in_stock" };
+
+  const priceUsd = Math.min(
+    ...candidates.map((candidate) => candidate.product.priceUsd),
+  );
+  return {
+    status: "ok",
+    priceUsd,
+    options: candidates
+      .filter((candidate) => candidate.product.priceUsd === priceUsd)
+      .map((candidate) => ({
+        product: candidate.product.name,
+        colors: candidate.colors,
+      })),
+  };
+}
+
 const get_products = tool({
   description:
     "List every Copper product with its price and the colors it comes in; says nothing about stock.",
@@ -228,9 +300,17 @@ const check_availability = tool({
   execute: async (input) => checkAvailability(input),
 });
 
+const find_cheapest_in_stock = tool({
+  description:
+    "Find the cheapest Copper product that has at least one color in stock today, and which colors can be bought now. Optionally limit it to one product. Every color of a product costs the same.",
+  inputSchema: cheapestInStockInput,
+  execute: async (input) => findCheapestInStock(input),
+});
+
 export const copperTools = {
   get_products,
   get_prices,
   calculate_cost,
   check_availability,
+  find_cheapest_in_stock,
 };

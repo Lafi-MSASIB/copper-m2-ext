@@ -175,6 +175,11 @@ function SentList({ step }: { step: ToolStep }) {
   } else if (step.name === "check_availability") {
     rows.push(["Product", productName(input.product)]);
     if (input.color) rows.push(["Color", String(input.color)]);
+  } else if (step.name === "find_cheapest_in_stock") {
+    rows.push([
+      "Product",
+      input.product ? productName(input.product) : "Any product",
+    ]);
   } else {
     for (const [key, value] of Object.entries(input))
       rows.push([key, String(value)]);
@@ -333,6 +338,43 @@ function CameBack({ step }: { step: ToolStep }) {
                 {row.restockDate ? ` until ${niceDate(row.restockDate)}` : ""}
               </Pill>
             )}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (step.name === "find_cheapest_in_stock") {
+    if (output.status === "none_in_stock") return <p>Nothing is in stock.</p>;
+    if (output.status === "unavailable") return <p>{String(output.message)}</p>;
+    const options =
+      (output.options as {
+        product: string;
+        colors: { color: string; stock: string }[];
+      }[]) ?? [];
+    return (
+      <div className="flex flex-col gap-2">
+        {options.map((option) => (
+          <div key={option.product}>
+            <div className="flex justify-between gap-3 font-medium">
+              <span>{option.product}</span>
+              <span>{money(Number(output.priceUsd))}</span>
+            </div>
+            <div className="mt-1 flex flex-wrap gap-1">
+              {option.colors.map((row) => (
+                <Pill
+                  key={row.color}
+                  className={
+                    row.stock === "low_stock"
+                      ? "bg-chart-4 text-chart-5"
+                      : "bg-accent text-white"
+                  }
+                >
+                  {row.color}
+                  {row.stock === "low_stock" ? " (low stock)" : ""}
+                </Pill>
+              ))}
+            </div>
           </div>
         ))}
       </div>
